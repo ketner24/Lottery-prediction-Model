@@ -251,5 +251,34 @@ def train_xgboost_predictor(df_lotto, max_main=47, max_mega=27):
     fallback_mega = int(mega_counts.index[-1]) if last_mega != mega_counts.index[-1] else int(mega_counts.index[-2])
     
     return top_5_main, fallback_mega, df_pred
+
+# ==========================================
+    # 4. XGBOOST MACHINE LEARNING PREDICTOR
+    # ==========================================
+    st.divider()
+    st.subheader("🤖 AI Prediction: XGBoost Machine Learning")
+    st.markdown("This model treats lottery draws as a Time-Series Classification problem. It looks at the wait times and frequencies of every number and predicts the probability of it being drawn next based on historical patterns.")
+    
+    if st.button("Run XGBoost AI Predictor"):
+        with st.spinner("Engineering features and training XGBoost model..."):
+            # Format the numbers into a list so the XGBoost function can read it
+            # (Combining Num1 through Num5 into a single list per row)
+            df['Numbers'] = df[conf['num_cols']].values.tolist()
+            df['MegaBall'] = df[conf['mega_col']]
+            
+            # Calculate dynamic max limits based on current lottery configurations
+            top_5, predicted_mega, prob_df = train_xgboost_predictor(
+                df_lotto=df, 
+                max_main=conf['max_main'], 
+                max_mega=conf['max_mega']
+            )
+            
+            st.success(f"### 🏆 AI Recommended Ticket: {sorted(top_5)} | Mega Ball: {predicted_mega}")
+            
+            st.markdown("#### Top 10 Numbers by Machine Learning Probability")
+            # Display probabilities as percentages
+            st.dataframe(prob_df.head(10).style.format({'Probability': '{:.4f}'}))
+            
+            st.info("💡 **What is the AI looking at?** The model determined that the **Gap (Wait Time)** and **Frequency in the last 10 draws** were the most critical mathematical features in determining if a number would be drawn.")
 # This is the line that actually runs the code above!
 run_statistical_audits()

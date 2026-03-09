@@ -8,3 +8,5 @@ seaborn
 cloudscraper
 scipy
 statsmodels
+xgboost
+scikit-learn

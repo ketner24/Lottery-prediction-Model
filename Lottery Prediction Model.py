@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-from scipy.stats import chisquare, poisson, geom
+from scipy.stats import chisquare, poisson
 import statsmodels.stats.proportion as smp
 import xgboost as xgb
 
@@ -123,4 +123,113 @@ def run_statistical_audits():
         df = df.dropna(subset=[conf['date_col']])
         df = df[df[conf['date_col']] >= pd.to_datetime(conf['start_date'])].copy()
         df = df.sort_values(conf['date_col']).reset_index(drop=True)
-    except Exception as
+    except Exception as e:
+        st.error(f"Error loading {conf['file']}. Make sure the CSV is in the same folder.")
+        return
+
+    total_draws = len(df)
+    st.info(f"Analyzing **{total_draws} draws** since the machine was replaced on **{conf['start_date']}**.")
+
+    main_df = df[conf['num_cols']].apply(pd.to_numeric, errors='coerce')
+    main_nums = main_df.values.flatten()
+    main_nums = main_nums[~np.isnan(main_nums)]
+    mega_nums = pd.to_numeric(df[conf['mega_col']], errors='coerce').dropna().values
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.subheader("1. Fairness Hypothesis Testing")
+        st.markdown("*Null Hypothesis (H0): The machine draws balls uniformly.*")
+        
+        main_counts = pd.Series(main_nums).value_counts().reindex(range(1, conf['max_main'] + 1), fill_value=0)
+        expected_main_val = sum(main_counts) / conf['max_main']
+        chi2_main, p_main = chisquare(main_counts, f_exp=[expected_main_val] * conf['max_main'])
+        
+        mega_counts = pd.Series(mega_nums).value_counts().reindex(range(1, conf['max_mega'] + 1), fill_value=0)
+        expected_mega_val = sum(mega_counts) / conf['max_mega']
+        chi2_mega, p_mega = chisquare(mega_counts, f_exp=[expected_mega_val] * conf['max_mega'])
+
+        st.metric("Main Numbers P-Value", f"{p_main:.4f}")
+        st.metric("Mega Ball P-Value", f"{p_mega:.4f}")
+        
+        if p_main < 0.05 or p_mega < 0.05:
+            st.warning("⚠️ **P-Value < 0.05:** The machine shows statistically significant bias!")
+        else:
+            st.success("✅ **P-Value > 0.05:** We cannot reject the null hypothesis. The machine is fair.")
+
+    st.divider()
+    st.subheader(f"Deep Dive: Analyze a Specific Number")
+    target_num = st.number_input("Enter a Main Number to analyze:", min_value=1, max_value=conf['max_main'], value=7)
+    
+    draws_with_target = main_df.isin([target_num]).any(axis=1)
+    k = draws_with_target.sum()
+    expected_p = 5 / conf['max_main']
+
+    col3, col4 = st.columns(2)
+
+    with col3:
+        st.markdown("#### Confidence Intervals")
+        st.markdown(f"Number **{target_num}** was drawn **{k} times** out of {total_draws} draws.")
+        ci_low, ci_high = smp.proportion_confint(k, total_draws, alpha=0.05, method='wilson')
+        
+        st.write(f"- **Observed Probability:** {k/total_draws:.4f}")
+        st.write(f"- **Expected Probability:** {expected_p:.4f}")
+        st.write(f"- **95% Confidence Interval:** [{ci_low:.4f}, {ci_high:.4f}]")
+        
+        if ci_low <= expected_p <= ci_high:
+            st.success(f"Number {target_num}'s appearances are within expectations.")
+        else:
+            st.warning(f"Number {target_num} is appearing outside expected bounds!")
+
+    with col4:
+        st.markdown("#### Poisson & Geometric Wait Times")
+        expected_wait = 1 / expected_p
+        if k > 1:
+            draw_indices = np.where(draws_with_target)[0]
+            avg_actual_wait = np.mean(np.diff(draw_indices))
+            st.write(f"- **Geometric Expected Wait Time:** {expected_wait:.1f} draws")
+            st.write(f"- **Actual Average Wait Time:** {avg_actual_wait:.1f} draws")
+
+        st.markdown("---")
+        draws_in_year = 104
+        lambda_poisson = draws_in_year * expected_p
+        st.write(f"In a standard year ({draws_in_year} draws), we expect to see this number **{lambda_poisson:.1f} times**.")
+        
+        prob_exact = poisson.pmf(int(lambda_poisson), lambda_poisson) * 100
+        prob_more = (1 - poisson.cdf(int(lambda_poisson), lambda_poisson)) * 100
+        st.write(f"Odds of drawing it EXACTLY {int(lambda_poisson)} times: **{prob_exact:.2f}%**")
+        st.write(f"Odds of drawing it MORE than {int(lambda_poisson)} times: **{prob_more:.2f}%**")
+
+    # ==========================================
+    # 3. XGBOOST UI COMPONENT
+    # ==========================================
+    st.divider()
+    st.subheader("🤖 AI Prediction: XGBoost Machine Learning")
+    st.markdown("This model treats lottery draws as a Time-Series Classification problem. It calculates wait times and rolling frequencies to predict the most probable upcoming numbers.")
+    
+    if st.button("Run XGBoost AI Predictor"):
+        with st.spinner("Engineering features and training XGBoost model..."):
+            
+            # 1. Format the DataFrame so the AI can read the lists of numbers
+            df['Numbers'] = df[conf['num_cols']].values.tolist()
+            df['MegaBall'] = df[conf['mega_col']]
+            
+            # 2. Run the AI function
+            top_5, predicted_mega, prob_df = train_xgboost_predictor(
+                df_lotto=df, 
+                max_main=conf['max_main'], 
+                max_mega=conf['max_mega']
+            )
+            
+            # 3. Show Results
+            st.success(f"### 🏆 AI Recommended Ticket: {sorted(top_5)} | Mega Ball: {predicted_mega}")
+            
+            st.markdown("#### Top 10 Numbers by Machine Learning Probability")
+            st.dataframe(prob_df.head(10).style.format({'Probability': '{:.4f}'}))
+            
+            st.info("💡 **What is the AI looking at?** The model determined that the **Gap (Wait Time)** and **Frequency in the last 10 draws** were the most critical features in determining if a number would be drawn.")
+
+# ==========================================
+# 4. EXECUTE APP
+# ==========================================
+run_statistical_audits()

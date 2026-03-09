@@ -145,5 +145,111 @@ def run_statistical_audits():
         st.write(f"Odds of drawing it EXACTLY {int(lambda_poisson)} times: **{prob_exact:.2f}%**")
         st.write(f"Odds of drawing it MORE than {int(lambda_poisson)} times: **{prob_more:.2f}%**")
 
+import xgboost as xgb
+from sklearn.model_selection import train_test_split
+
+@st.cache_resource(show_spinner=False)
+def train_xgboost_predictor(df_lotto, max_main=47, max_mega=27):
+    """
+    Engineers time-series features and trains an XGBoost model 
+    to predict the probability of each number appearing in the NEXT draw.
+    """
+    # 1. Create a binary matrix of all historical draws
+    # Rows = Draws, Columns = Numbers 1 to max_main
+    draw_matrix = np.zeros((len(df_lotto), max_main), dtype=int)
+    for i, nums in enumerate(df_lotto['Numbers']):
+        for n in nums:
+            if 1 <= n <= max_main:
+                draw_matrix[i, n-1] = 1
+                
+    df_binary = pd.DataFrame(draw_matrix, columns=[f"Num_{i}" for i in range(1, max_main + 1)])
+    
+    # 2. Engineer Features for every number at every draw
+    dataset_rows = []
+    
+    # To calculate gaps (wait times) efficiently
+    last_seen = {n: -100 for n in range(1, max_main + 1)} 
+    
+    # We will start from draw index 10 to allow some history to build up
+    for draw_idx in range(10, len(df_lotto) - 1): 
+        
+        # Calculate recent frequencies using a lookback window
+        recent_10 = df_binary.iloc[draw_idx-10:draw_idx].sum()
+        recent_3 = df_binary.iloc[draw_idx-3:draw_idx].sum()
+        
+        # Target is what actually happened in the NEXT draw
+        next_draw_results = df_binary.iloc[draw_idx + 1]
+        
+        for n in range(1, max_main + 1):
+            col_name = f"Num_{n}"
+            
+            # Update last seen
+            if df_binary.iloc[draw_idx][col_name] == 1:
+                last_seen[n] = draw_idx
+                
+            gap = draw_idx - last_seen[n]
+            
+            dataset_rows.append({
+                'Number': n,
+                'Gap': gap,
+                'Freq_Last_10': recent_10[col_name],
+                'Freq_Last_3': recent_3[col_name],
+                'Target': next_draw_results[col_name]
+            })
+
+    # Create the training DataFrame
+    ml_df = pd.DataFrame(dataset_rows)
+    
+    # 3. Train the XGBoost Model
+    X = ml_df[['Number', 'Gap', 'Freq_Last_10', 'Freq_Last_3']]
+    y = ml_df['Target']
+    
+    # Initialize and train the classifier
+    xgb_model = xgb.XGBClassifier(
+        n_estimators=100, 
+        max_depth=4, 
+        learning_rate=0.05, 
+        eval_metric='logloss',
+        random_state=42
+    )
+    xgb_model.fit(X, y)
+    
+    # 4. Predict the NEXT draw (using the very last row of data as current state)
+    latest_idx = len(df_lotto) - 1
+    recent_10_latest = df_binary.iloc[latest_idx-9:latest_idx+1].sum()
+    recent_3_latest = df_binary.iloc[latest_idx-2:latest_idx+1].sum()
+    
+    prediction_rows = []
+    for n in range(1, max_main + 1):
+        # Update gap for the final state
+        if df_binary.iloc[latest_idx][f"Num_{n}"] == 1:
+            current_gap = 0
+        else:
+            current_gap = latest_idx - last_seen[n]
+            
+        prediction_rows.append({
+            'Number': n,
+            'Gap': current_gap,
+            'Freq_Last_10': recent_10_latest[f"Num_{n}"],
+            'Freq_Last_3': recent_3_latest[f"Num_{n}"]
+        })
+        
+    df_pred = pd.DataFrame(prediction_rows)
+    
+    # Predict probabilities
+    probabilities = xgb_model.predict_proba(df_pred[['Number', 'Gap', 'Freq_Last_10', 'Freq_Last_3']])[:, 1]
+    df_pred['Probability'] = probabilities
+    
+    # Sort to find the highest probability numbers
+    df_pred = df_pred.sort_values(by='Probability', ascending=False)
+    top_5_main = df_pred['Number'].head(5).tolist()
+    
+    # Mega Ball (Simpler prediction based on recent frequency gap)
+    mega_counts = df_lotto['MegaBall'].value_counts()
+    # Find the most "due" mega ball by looking at what hasn't been drawn in the longest time
+    last_mega = df_lotto['MegaBall'].iloc[-1]
+    fallback_mega = int(mega_counts.index[-1]) if last_mega != mega_counts.index[-1] else int(mega_counts.index[-2])
+    
+    return top_5_main, fallback_mega, df_pred
 # This is the line that actually runs the code above!
 run_statistical_audits()

@@ -83,9 +83,33 @@ def train_xgboost_predictor(df_lotto, max_main=47, max_mega=27):
     df_pred = df_pred.sort_values(by='Probability', ascending=False)
     top_5_main = df_pred['Number'].head(5).tolist()
     
-    mega_counts = df_lotto['MegaBall'].value_counts()
-    last_mega = df_lotto['MegaBall'].iloc[-1]
-    fallback_mega = int(mega_counts.index[-1]) if last_mega != mega_counts.index[-1] else int(mega_counts.index[-2])
+    # ==========================================
+    # Mega Ball Prediction (Strictly Bounded)
+    # ==========================================
+    # Force data to be numeric and strictly within the valid range for this lottery
+    valid_megas = pd.to_numeric(df_lotto['MegaBall'], errors='coerce').dropna()
+    valid_megas = valid_megas[(valid_megas >= 1) & (valid_megas <= max_mega)].astype(int)
+    
+    if not valid_megas.empty:
+        mega_counts = valid_megas.value_counts()
+        last_mega = valid_megas.iloc[-1]
+        
+        # Check if there are valid numbers that have NEVER been drawn yet
+        drawn_set = set(mega_counts.index)
+        all_set = set(range(1, max_mega + 1))
+        never_drawn = list(all_set - drawn_set)
+        
+        if never_drawn:
+            # If a valid number has never been drawn, it's the most "due". Pick it.
+            fallback_mega = sorted(never_drawn)[0] 
+        else:
+            # Otherwise, pick the least frequent valid number
+            fallback_mega = int(mega_counts.index[-1])
+            # If the least frequent was literally just drawn last week, pick the second least frequent
+            if fallback_mega == last_mega and len(mega_counts) > 1:
+                fallback_mega = int(mega_counts.index[-2])
+    else:
+        fallback_mega = 1 # Absolute safety fallback
     
     return top_5_main, fallback_mega, df_pred
 

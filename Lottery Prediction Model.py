@@ -145,5 +145,5 @@ def run_statistical_audits():
         st.write(f"Odds of drawing it EXACTLY {int(lambda_poisson)} times: **{prob_exact:.2f}%**")
         st.write(f"Odds of drawing it MORE than {int(lambda_poisson)} times: **{prob_more:.2f}%**")
 
-# Just call the function somewhere in your Streamlit app:
-# run_statistical_audits()
+# This is the line that actually runs the code above!
+run_statistical_audits()

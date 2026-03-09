@@ -1,8 +1,10 @@
 streamlit
-requests
 pandas
 numpy
 pymc
 arviz
 matplotlib
 seaborn
+cloudscraper
+scipy
+statsmodels

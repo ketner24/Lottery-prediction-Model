@@ -1,0 +1,14 @@
+__pycache__
+*.py[cod]
+.git
+.gitignore
+.venv
+venv
+*.csv
+lottery_http_cache.sqlite
+.pytest_cache
+screenshots/
+tests/
+README.md
+LICENSE
+.github/

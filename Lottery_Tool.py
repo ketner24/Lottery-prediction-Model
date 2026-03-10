@@ -690,12 +690,13 @@ def render_main():
 
             # --- Probability table ---
             st.markdown("#### Top 15 Numbers by Predicted Probability")
-            display_df = prob_df.head(15)[["Number", "Gap", "Freq_Last_10", "Freq_Last_3", "Probability"]]
+            display_df = prob_df.head(15)[["Number", "Gap", "Freq_Last_10", "Freq_Last_3", "Probability"]].copy()
+            display_df["Number"] = display_df["Number"].astype(int)
+            display_df["Probability"] = display_df["Probability"].round(4)
             st.dataframe(
-                display_df.style.format({"Probability": "{:.4f}"}).background_gradient(
-                    subset=["Probability"], cmap="YlOrRd"
-                ),
+                display_df,
                 use_container_width=True,
+                hide_index=True,
             )
 
             # Feature importance
